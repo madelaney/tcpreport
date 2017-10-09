@@ -27,7 +27,7 @@ help() {
                 command should be terminated
 
     -d DIR      Directory to write output file to
-                default: ${PWD}
+                default: ${DIR}
 
     -f FILE     Filename to send tcpdump data to
                 default: ${FILENAME}
