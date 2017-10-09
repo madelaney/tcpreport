@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+
+BASENAME=`basename $0`
+DIR=/tmp
+FILENAME="tcpreport.cap"
+TIMEOUT=10
+EXPRESSION='(dst port 80 or dst port 443)'
+PIDFILE="/tmp/${BASENAME}.pid"
+
+if [[ `id -u` -ne 0 ]]; then
+  echo "You need to run this as root, please try again"
+  exit 1
+fi
+
+if [[ -z `which timelimit` ]]; then
+  echo "Couldn't find timelimit binary, please install and try again"
+  exit 1
+fi
+
+COMMAND=$1
+shift 1
+
+help() {
+  variable=$(cat <<SETVAR
+  usage ${0} (start|stop) [options....]
+    -t SECOND   Timeout, in seconds, for when the
+                command should be terminated
+
+    -d DIR      Directory to write output file to
+                default: ${PWD}
+
+    -f FILE     Filename to send tcpdump data to
+                default: ${FILENAME}
+
+    -e EXP      TCPDump filter expression
+                default: ${EXPRESSION}
+
+  example:
+    * sudo tcprecord start
+    * sudo tcprecord stop
+SETVAR
+)
+
+  echo "$variable"
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -t)
+      TIMEOUT="$2"
+      shift 2
+      ;;
+
+    -f)
+      FILENAME="$2"
+      shift 2
+      ;;
+
+    -e)
+      EXPRESSION="$2"
+      shift 2
+      ;;
+
+    -d)
+      DIR="$2"
+      shift 2
+      ;;
+
+    -h)
+      help
+      exit 1
+      ;;
+
+    -*)
+      echo "unknown option: $1" >&2;
+      exit 1
+      ;;
+
+    *)
+      handle_argument "$1"
+      shift 1
+      ;;
+  esac
+done
+
+running() {
+  status=1
+
+  if [[ -f ${PIDFILE} ]]; then
+    PID=`cat ${PIDFILE}`
+    kill -0 ${PID}
+    status=$?
+  fi
+
+  if [[ ${status} -eq 0 ]]; then
+    echo 1
+  else
+    echo 0
+  fi
+}
+
+status_tcpreport() {
+  if (( $(running) )) ; then
+    echo "tcpreport is running ..."
+  else
+    echo "tcpreport is not running ..."
+  fi
+}
+
+start_tcpreport() {
+  if [[ -f ${PIDFILE} ]]; then
+    if (( running )) ; then
+      echo "tcpreport is already running, cannot start a new instance"
+      exit 1
+    else
+      rm ${PIDFILE}
+    fi
+  fi
+
+  timelimit -t ${TIMEOUT} tcpdump -w ${DIR}/${FILENAME} "${EXPRESSION}" &
+  echo "$!" >> ${PIDFILE}
+}
+
+stop_tcpreport() {
+  if [[ ! -z "${SUDO_USER}" ]]; then
+    if [[ -f "${DIR}/${FILENAME}" ]]; then
+      chown ${SUDO_USER} ${DIR}/${FILENAME}
+    fi
+  fi
+
+  if [[ -f ${PIDFILE} ]]; then
+    PID=`cat ${PIDFILE}`
+
+    # This kills any thread started by timelimie
+    pkill -P ${PID} ||:
+
+    # This kills the timelimit thread
+    pkill -F ${PIDFILE} ||:
+    rm ${PIDFILE}
+  fi
+}
+
+case ${COMMAND} in
+  start)
+    start_tcpreport
+    ;;
+
+  stop)
+    stop_tcpreport
+    ;;
+
+  status)
+    status_tcpreport
+    ;;
+
+  *)
+    echo "Action must be start, or stop. Unknown action ${COMMAND}"
+    help
+    exit 1
+    ;;
+esac
